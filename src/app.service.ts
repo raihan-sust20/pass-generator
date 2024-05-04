@@ -2,16 +2,16 @@ import { Injectable } from '@nestjs/common';
 import * as R from 'ramda';
 import { GeneratePasswordDto } from './dto/generate-password.dto';
 // import { customAlphabet } from 'nanoid';
-import {customAlphabet} from 'nanoid';
+import { customAlphabet } from 'nanoid';
 
 export enum CharCase {
   Upper = 'upper',
-  Lower = 'lower'
+  Lower = 'lower',
 }
 
 @Injectable()
 export class AppService {
-  private symbols ='!"#$%&\'()*+,-./:;<=>?@[\]^_`{|}~';
+  private symbols = '!"#$%&\'()*+,-./:;<=>?@[]^_`{|}~';
 
   private generateAlphabet(charCase: CharCase) {
     const startChar = charCase === CharCase.Upper ? 'A' : 'a';
@@ -22,17 +22,18 @@ export class AppService {
       }),
       R.join(''),
     )(25);
-  };
+  }
 
   private lowerCaseAlphabet = this.generateAlphabet(CharCase.Lower);
-    private upperCaseAlphabet = this.generateAlphabet(CharCase.Upper);
+  private upperCaseAlphabet = this.generateAlphabet(CharCase.Upper);
 
   generatePassword(requestData: GeneratePasswordDto): string {
     const passwordLength = R.prop('passwordLength', requestData);
 
-    const charString = this.lowerCaseAlphabet + this.upperCaseAlphabet + this.symbols;
+    const charString =
+      this.lowerCaseAlphabet + this.upperCaseAlphabet + this.symbols;
 
-    const nanoId = customAlphabet(charString, passwordLength)
+    const nanoId = customAlphabet(charString, passwordLength);
 
     return nanoId();
   }
