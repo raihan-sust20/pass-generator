@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import * as R from 'ramda';
+import * as RA from 'ramda-adjunct';
 import * as chalk from 'chalk';
-import * as prompts from 'prompts';
+import * as inquirer from 'inquirer';
 import { customAlphabet } from 'nanoid';
-import { exec } from 'child_process';
+import copy from 'copy-to-clipboard';
 
 export enum CharType {
   UpperCase = 'upper-case',
@@ -20,75 +21,83 @@ export enum PassType {
 
 @Injectable()
 export class AppService {
-  private passwordType = undefined;
   private successText;
   private errorText;
+  private secretText;
+  private infoText;
 
   constructor() {
     this.successText = chalk.hex('#16A085');
     this.errorText = chalk.hex('#E74C3C ');
+    this.secretText = chalk.hex('#da68a0');
+    this.infoText = chalk.hex('#4a536b');
   }
 
-  private promptsObject = [
+  private validatePasswordLength(passwordLength: number) {
+    return R.lte(4, passwordLength) && R.gte(2048, passwordLength)
+      ? true
+      : 'Password lenght must be between 4 and 2048';
+  }
+
+  private prepareCharTypeList(answers: Record<string, any>) {
+    const initialChoiceList = [
+      { name: 'Uppercase', value: CharType.UpperCase },
+      { name: 'Lowercase', value: CharType.LowerCase },
+    ];
+
+    return answers.passwordType === PassType.EasyToSay
+      ? initialChoiceList
+      : R.concat(initialChoiceList, [
+          {
+            name: 'Numbers',
+            value: CharType.Numbers,
+          },
+          {
+            name: 'Symbols',
+            value: CharType.Symbols,
+          },
+        ]);
+  }
+
+  private questions = [
     {
       type: 'number',
       name: 'passwordLength',
-      message: 'Password length:',
-      initial: 4,
-      style: 'default',
-      min: 4,
-      max: 2048,
+      message: 'Password length(Must be between 4 and 2048):',
+      default: 4,
+      validate: this.validatePasswordLength,
     },
     {
-      type: 'select',
+      type: 'list',
       name: 'passwordType',
-      message: 'Please choose password type:',
+      message: 'Please choose password property:',
       choices: [
         {
-          title: 'Easy to say',
-          description: 'Avoid numbers and special characters',
+          name: 'Avoid numbers and special characters',
           value: PassType.EasyToSay,
         },
         {
-          title: 'Easy to read',
-          description: 'Avoid ambigious characters like O, 0, l, 1, |',
+          name: 'Avoid ambigious characters like O, 0, l, 1, |',
           value: PassType.EasyToRead,
-          disabled: true,
         },
         {
-          title: 'All characters',
-          description: 'Any character combination like 1,5, a, B, ~, #, &',
+          name: 'Use any character combination like 1,5, a, B, ~, #, &',
           value: PassType.AllCharacters,
         },
       ],
-      initial: 3,
-      format: (passwordType) => {
-        this.passwordType = passwordType;
-
-        return passwordType;
-      },
     },
     {
-      type: 'multiselect',
+      type: 'checkbox',
       name: 'charTypeList',
-      message: 'Please select characters to include',
-      instructions: true,
-      choices: [
-        { title: 'Uppercase', value: CharType.UpperCase, selected: true },
-        { title: 'Lowercase', value: CharType.LowerCase, selected: true },
-        {
-          title: 'Numbers',
-          value: CharType.Numbers,
-          disabled: this.passwordType === PassType.EasyToSay,
-        },
-        {
-          title: 'Symbols',
-          value: CharType.Symbols,
-          disabled: this.passwordType === PassType.EasyToSay,
-        },
-      ],
-      min: 1,
-      hint: '- Space to select. Return to submit',
+      message: 'Please select characters to include in password: ',
+      choices: this.prepareCharTypeList,
+      validate(answers: CharType[]) {
+        const selectedCharListLength = R.length(answers);
+
+        return R.lt(0, selectedCharListLength)
+          ? true
+          : 'Please select at least one!';
+      },
     },
   ];
 
@@ -108,12 +117,12 @@ export class AppService {
     const charStrGenerator = {
       [CharType.UpperCase]: this.generateAlphabet(CharType.UpperCase),
       [CharType.LowerCase]: this.generateAlphabet(CharType.LowerCase),
-      [CharType.Numbers]: R.range(0, 9),
+      [CharType.Numbers]: R.pipe(R.range(0), R.join(''))(9),
       [CharType.Symbols]: symbols,
     };
 
     return R.reduce(
-      (charTypeItem: CharType, finalCharStr: string) => {
+      (finalCharStr: string, charTypeItem: CharType) => {
         return R.concat(finalCharStr, charStrGenerator[charTypeItem]);
       },
       '',
@@ -121,51 +130,55 @@ export class AppService {
     );
   }
 
+  private excludeAmbigousChars(charStr: string) {
+    const ambigiousChars = ['O', '0', 'l', '1', '|'];
+
+    return R.filter(R.pipe(R.includes(R.__, ambigiousChars), R.not), charStr);
+  }
+
   async generatePassword(): Promise<void> {
     let shouldContinueProgram = true;
 
-    while (shouldContinueProgram) {
-      let userResponse = {
-        charTypeList: [CharType.UpperCase],
-        passwordLength: 8,
-      };
+    while (RA.isTrue(shouldContinueProgram)) {
+      try {
+        let userResponse = {
+          passwordType: [PassType.AllCharacters],
+          charTypeList: [CharType.UpperCase],
+          passwordLength: 8,
+          continueProgram: true,
+        };
 
-      await (async () => {
-        userResponse = await prompts(this.promptsObject);
-      })();
+        userResponse = await inquirer.prompt(this.questions);
 
-      const { charTypeList, passwordLength } = userResponse;
-      const charString = this.getChars(charTypeList);
+        const { passwordType, charTypeList, passwordLength } = userResponse;
+        const charString = this.getChars(charTypeList);
+        const finalCharString = R.equals(passwordType, PassType.EasyToRead)
+          ? this.excludeAmbigousChars(charString)
+          : charString;
 
-      const nanoId = customAlphabet(charString, passwordLength);
-      const password = nanoId();
+        const nanoId = customAlphabet(finalCharString, passwordLength);
+        const password = nanoId();
 
-      console.log(this.successText(`Generated Password: ${password}\n\n\n`));
+        console.log(
+          this.successText.bold('Generated Password:\n'),
+          this.secretText.italic(`${password}\n\n`),
+        );
 
-      exec(`xclip ${password}`, (error) => {
-        if (error) {
-          console.log(this.errorText('Please confirm xclip is installed'));
-          console.error(this.errorText(`Shell error: ${error}`));
-          return;
-        }
+        /**
+         * @todo Find a safe way to copy password to clipboard.
+         */
 
-        if (R.isNil(error)) {
-          console.log(
-            this.successText('Password has been copied to clipboard!'),
-          );
-        }
-      });
-
-      await (async function () {
-        userResponse = await prompts({
+        userResponse = await inquirer.prompt({
           type: 'confirm',
           name: 'continueProgram',
           message: 'Generate another password?',
-          initial: true,
         });
-      })();
 
-      shouldContinueProgram = R.prop('continueProgram', userResponse);
+        shouldContinueProgram = R.prop('continueProgram', userResponse);
+      } catch (error) {
+        console.log(this.errorText('Whoops! Something went wrong.'));
+        console.log(this.errorText(error));
+      }
     }
   }
 }
