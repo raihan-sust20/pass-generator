@@ -4,7 +4,6 @@ import * as RA from 'ramda-adjunct';
 import * as chalk from 'chalk';
 import * as inquirer from 'inquirer';
 import { customAlphabet } from 'nanoid';
-import copy from 'copy-to-clipboard';
 
 export enum CharType {
   UpperCase = 'upper-case',
